@@ -128,7 +128,7 @@
                     "wget https://dsm-ipaddress.194:4119/software/agent/amzn1/x86_64/ -O /tmp/agent.rpm --no-check-certificate --quiet",
                     "rpm -ihv /tmp/agent.rpm",
                     "sleep 10",
-                    "/opt/ds_agent/dsa_control -a dsm://dsm-ipaddress:4120/ \"policyid:21\"",
+                    "/opt/ds_agent/dsa_control -a dsm://dsm-ipaddress:4120/ \"policyid:XX\"",
                     "sleep 10",
                     "/opt/ds_agent/dsa_control -m",
                     "sleep 10",
