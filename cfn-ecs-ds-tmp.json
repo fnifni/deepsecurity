@@ -1,0 +1,187 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+        "ProjectName": {
+            "Type": "String",
+            "Default": "Cloudpack"
+        },
+        "RoleName": {
+            "Type": "String",
+            "Default": "Ecs"
+        },
+        "KeyName": {
+            "Type": "AWS::EC2::KeyPair::KeyName"
+        },
+        "InstanceType": {
+            "Type": "String",
+            "Default": "c3.large"
+        },
+        "CommonSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup::Id"
+        },
+        "VpcId": {
+            "Type": "AWS::EC2::VPC::Id"
+        },
+        "Az1VpcZoneIdentifier": {
+            "Type": "AWS::EC2::Subnet::Id"
+        },
+        "Az2VpcZoneIdentifier": {
+            "Type": "AWS::EC2::Subnet::Id"
+        },
+        "DesiredCapacity": {
+            "Type": "String",
+            "Default": "2"
+        }
+    },
+    "Mappings": {
+        "RegionMapping": {
+            "us-east-1": { "ImageId": "ami-5f59ac34" },
+            "us-west-2": { "ImageId": "ami-c188b0f1" },
+            "eu-west-1": { "ImageId": "ami-3db4ca4a" },
+            "ap-northeast-1": { "ImageId": "ami-ca01d8ca" },
+            "ap-southeast-2": { "ImageId": "ami-5b5d2661" }
+        }
+    },
+    "Resources": {
+        "Cluster": {
+            "Type": "AWS::ECS::Cluster"
+        },
+        "RoleSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": { "Fn::Join" : [ "", [
+                    { "Ref": "ProjectName" },
+                    { "Ref": "RoleName" }
+                ] ] },
+                "VpcId": { "Ref": "VpcId" },
+                "SecurityGroupIngress": [],
+                "SecurityGroupEgress": [],
+                "Tags": [ {
+                    "Key": "Name",
+                    "Value": { "Fn::Join" : [ "", [
+                        { "Ref": "ProjectName" },
+                        { "Ref": "RoleName" },
+                        "Instance"
+                    ] ] }
+                } ]
+            }
+        },
+        "Role": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [ {
+                        "Effect": "Allow",
+                        "Principal": { "Service": [ "ec2.amazonaws.com" ] },
+                        "Action": [ "sts:AssumeRole" ]
+                    } ]
+                },
+                "Path": "/",
+                "Policies": [ {
+                    "PolicyName": { "Fn::Join" : [ "", [
+                        { "Ref": "ProjectName" },
+                        "Ecs"
+                    ] ] },
+                    "PolicyDocument": {
+                        "Version" : "2012-10-17",
+                        "Statement": [ {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ecs:CreateCluster",
+                                "ecs:DeregisterContainerInstance",
+                                "ecs:DiscoverPollEndpoint",
+                                "ecs:Poll",
+                                "ecs:RegisterContainerInstance",
+                                "ecs:Submit*"
+                            ],
+                            "Resource": [ "*" ]
+                        } ]
+                    }
+                } ]
+            }
+        },
+        "InstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "Properties": {
+                "Path": "/",
+                "Roles": [ {
+                    "Ref": "Role"
+                } ]
+            }
+        },
+        "LaunchConfiguration": {
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Properties": {
+                "AssociatePublicIpAddress": "true",
+                "KeyName": { "Ref": "KeyName" },
+                "ImageId": { "Fn::FindInMap": [ "RegionMapping", { "Ref": "AWS::Region" }, "ImageId" ] },
+                "InstanceType": { "Ref": "InstanceType" },
+                "IamInstanceProfile": { "Ref": "InstanceProfile" },
+                "SecurityGroups": [
+                    { "Ref": "CommonSecurityGroup" },
+                    { "Ref": "RoleSecurityGroup" }
+                ],
+                "UserData": { "Fn::Base64": { "Fn::Join" : [ "\n", [
+                    "#!/bin/bash",
+                    "yum install -y wget",
+                    "wget https://dsm-ipaddress.194:4119/software/agent/amzn1/x86_64/ -O /tmp/agent.rpm --no-check-certificate --quiet",
+                    "rpm -ihv /tmp/agent.rpm",
+                    "sleep 10",
+                    "/opt/ds_agent/dsa_control -a dsm://dsm-ipaddress:4120/ \"policyid:21\"",
+                    "sleep 10",
+                    "/opt/ds_agent/dsa_control -m",
+                    "sleep 10",
+                    "/opt/ds_agent/dsa_control -m",
+                    "sleep 10",
+                    "yum -y update",
+                    "grubby --default-kernel | grep `uname -r` || reboot",
+                    { "Fn::Join" : [ "", [
+                        "echo ECS_CLUSTER=",
+                        { "Ref": "Cluster" },
+                        " >> /etc/ecs/ecs.config"
+                    ] ] }
+                ] ] } }
+            }
+        },
+        "AutoScalingGroup": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "LaunchConfigurationName": { "Ref": "LaunchConfiguration" },
+                "MinSize": "0",
+                "MaxSize": "4",
+                "DesiredCapacity": { "Ref": "DesiredCapacity" },
+                "Cooldown": "0",
+                "VPCZoneIdentifier": [
+                    { "Ref" : "Az1VpcZoneIdentifier" },
+                    { "Ref" : "Az2VpcZoneIdentifier" }
+                ],
+                "Tags": [ {
+                    "Key": "Name",
+                    "Value": { "Fn::Join" : [ "", [
+                        { "Ref": "ProjectName" },
+                        { "Ref": "RoleName" }
+                    ] ] },
+                    "PropagateAtLaunch": "true"
+                } ]
+            },
+            "UpdatePolicy": {
+                "AutoScalingRollingUpdate": {
+                    "MaxBatchSize": "1",
+                    "MinInstancesInService": "1"
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "Cluster": {
+            "Value":  { "Ref": "Cluster" }
+        },
+        "Role": {
+            "Value":  { "Ref": "Role" }
+        },
+        "RoleSecurityGroup": {
+            "Value":  { "Ref": "RoleSecurityGroup" }
+        }
+    }
+}
